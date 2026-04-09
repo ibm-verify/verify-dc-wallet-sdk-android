@@ -1,5 +1,38 @@
 # EUDI Wallet Core library for Android
 
+
+## Project Preamble
+
+This repository is a fork of an open source project originally developed and maintained by the [European Union Digital Identity (EUDI) Community](https://github.com/eu-digital-identity-wallet). All credit for the original design and implementation belongs to the EUDI Community and its contributors.
+
+This repository is maintained by IBM as a fork of the upstream EUDI Community project. The purpose of this fork is to:
+- Explore integration patterns with IBM identity and security platforms
+- Test extensions or configuration options specific to enterprise use cases
+- Contribute improvements and feedback back to the upstream EUDI project where appropriate
+
+### Relationship to IBM Offerings
+
+IBM uses this fork to evaluate and demonstrate how EUDI-aligned technologies can integrate with IBM solutions such as:
+
+- IBM Verify and related digital identity services
+- IBM security, trust, and compliance tooling
+- Enterprise deployment and operational models
+
+This repository **does not represent an official IBM product** and is provided on an open source, best‑effort basis unless otherwise stated.
+
+### Upstream Project and Attribution
+
+This repository is a fork of the following upstream project:
+- **Upstream project:** EUDI Wallet Core library for Android
+- **Upstream repository:** https://github.com/eu-digital-identity-wallet/eudi-lib-android-wallet-core
+- **Maintained by:** EUDI Community
+
+IBM does not claim ownership of the original project. All original copyrights, trademarks, and licensing terms remain with the EUDI Community and its contributors.
+
+If you are looking for the canonical implementation or wish to contribute to the main project, please refer to the upstream repository.
+
+---
+
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=eu-digital-identity-wallet_eudi-lib-android-wallet-core&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=eu-digital-identity-wallet_eudi-lib-android-wallet-core)
 
 **Important!** Before you proceed, please read
