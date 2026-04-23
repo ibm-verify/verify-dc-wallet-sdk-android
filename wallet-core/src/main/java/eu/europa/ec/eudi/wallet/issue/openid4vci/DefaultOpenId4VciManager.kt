@@ -20,21 +20,30 @@ import android.content.Context
 import android.net.Uri
 import androidx.core.net.toUri
 import eu.europa.ec.eudi.openid4vci.CredentialConfigurationIdentifier
+import eu.europa.ec.eudi.openid4vci.CredentialIssuanceError
 import eu.europa.ec.eudi.openid4vci.CredentialIssuerId
 import eu.europa.ec.eudi.openid4vci.CredentialIssuerMetadata
 import eu.europa.ec.eudi.openid4vci.CredentialIssuerMetadataResolver
 import eu.europa.ec.eudi.openid4vci.DeferredIssuer
 import eu.europa.ec.eudi.openid4vci.Issuer
 import eu.europa.ec.eudi.openid4vci.IssuerMetadataPolicy
+import eu.europa.ec.eudi.openid4vci.SubmissionOutcome
 import eu.europa.ec.eudi.wallet.document.DeferredDocument
 import eu.europa.ec.eudi.wallet.document.DocumentId
 import eu.europa.ec.eudi.wallet.document.DocumentManager
 import eu.europa.ec.eudi.wallet.document.format.DocumentFormat
 import eu.europa.ec.eudi.wallet.document.format.MsoMdocFormat
+import eu.europa.ec.eudi.wallet.internal.d
+import eu.europa.ec.eudi.wallet.internal.e
 import eu.europa.ec.eudi.wallet.internal.mainExecutor
 import eu.europa.ec.eudi.wallet.internal.wrappedWithContentNegotiation
 import eu.europa.ec.eudi.wallet.internal.wrappedWithLogging
 import eu.europa.ec.eudi.wallet.issue.openid4vci.IssueEvent.Companion.failure
+import eu.europa.ec.eudi.wallet.issue.openid4vci.OpenId4VciManager.Companion.TAG
+import eu.europa.ec.eudi.wallet.issue.openid4vci.dpop.DPopConfig
+import eu.europa.ec.eudi.wallet.issue.openid4vci.reissue.IssuanceMetadata
+import eu.europa.ec.eudi.wallet.issue.openid4vci.reissue.ReissuanceAuthorizationException
+import eu.europa.ec.eudi.wallet.issue.openid4vci.reissue.ReissuanceIssuer
 import eu.europa.ec.eudi.wallet.logging.Logger
 import eu.europa.ec.eudi.wallet.provider.WalletAttestationsProvider
 import eu.europa.ec.eudi.wallet.provider.WalletKeyManager
@@ -46,6 +55,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import org.multipaz.storage.Storage
+import org.multipaz.storage.android.AndroidStorage
+import java.io.File
 import java.util.concurrent.Executor
 
 /**
@@ -82,6 +94,20 @@ internal class DefaultOpenId4VciManager(
     private val issuerAuthorization: IssuerAuthorization by lazy {
         val handler = config.authorizationHandler ?: BrowserAuthorizationHandler(context, logger)
         IssuerAuthorization(handler, logger)
+    }
+
+    /**
+     * Storage for issuance metadata.
+     * If not configured in [config], uses a default AndroidStorage with a separate database file.
+     */
+    private val issuanceMetadataStorage: Storage by lazy {
+        config.issuanceMetadataStorage ?: run {
+            val storagePath = File(
+                context.noBackupFilesDir,
+                "issuance_metadata.db"
+            ).absolutePath
+            AndroidStorage(storagePath)
+        }
     }
 
     override suspend fun getIssuerMetadata(): Result<CredentialIssuerMetadata> {
@@ -207,9 +233,18 @@ internal class DefaultOpenId4VciManager(
         launch(executor, onIssueResult) { coroutineScope, callback ->
             try {
 
+                // Resolve DPopConfig so DeferredContext can recreate the DPoP signer
+                val resolvedDpopConfig = when (val cfg = config.dpopConfig) {
+                    DPopConfig.Disabled -> null
+                    DPopConfig.Default -> DPopConfig.Default.make(context)
+                    is DPopConfig.Custom -> cfg
+                }
+
                 val deferredContext = DeferredContext.fromBytes(
                     deferredDocument.relatedData,
-                    walletAttestationKeyManager
+                    walletAttestationKeyManager,
+                    dpopConfig = resolvedDpopConfig,
+                    logger = logger,
                 )
                 val clientAttestationPopKeyId = deferredContext.clientAttestationPopKeyId
                 when {
@@ -226,17 +261,20 @@ internal class DefaultOpenId4VciManager(
 
                         ProcessDeferredOutcome(
                             documentManager = documentManager,
-                            walletKeyManager = walletAttestationKeyManager,
-                            clientAttestationPopKeyId = clientAttestationPopKeyId,
                             callback = callback,
                             deferredContext = ctx?.let {
                                 DeferredContext(
                                     issuanceContext = it,
                                     keyAliases = deferredContext.keyAliases,
-                                    clientAttestationPopKeyId = clientAttestationPopKeyId
+                                    clientAttestationPopKeyId = clientAttestationPopKeyId,
+                                    dPoPKeyAlias = deferredContext.dPoPKeyAlias,
+                                    credentialConfigurationIdentifier = deferredContext.credentialConfigurationIdentifier,
+                                    credentialEndpoint = deferredContext.credentialEndpoint,
+                                    replacesDocumentId = deferredContext.replacesDocumentId,
                                 )
                             } ?: deferredContext,
-                            logger = logger
+                            logger = logger,
+                            issuanceMetadataStorage = issuanceMetadataStorage,
                         ).process(deferredDocument, deferredContext.keyAliases, outcome)
                     }
                 }
@@ -271,6 +309,146 @@ internal class DefaultOpenId4VciManager(
         resumeWithAuthorization(uri.toUri())
     }
 
+    override fun reissueDocument(
+        documentId: DocumentId,
+        allowAuthorizationFallback: Boolean,
+        executor: Executor?,
+        onIssueEvent: OpenId4VciManager.OnIssueEvent
+    ) {
+        launch(executor, onIssueEvent) { coroutineScope, listener ->
+            try {
+                //  Load issuance metadata from storage
+                val issuanceMetadata = loadIssuanceMetadata(documentId)
+                    ?: throw IllegalStateException("No issuance metadata found for document $documentId")
+
+                logger?.d(TAG, "Loaded issuanceMetadata: credentialIssuerId=${issuanceMetadata.credentialIssuerId}")
+
+                //  Reconstruct AuthorizedRequest from stored metadata
+                var authorizedRequest = ReissuanceIssuer().reconstructAuthorizedRequest(issuanceMetadata)
+
+                //  Create Issuer using IssuerCreator (resolves issuer metadata)
+                //  Pass existing DPoP key alias so the same key is reused
+                //  (access token is bound to original key's thumbprint)
+                val issuer = issuerCreator.createIssuer(
+                    issuanceMetadata.credentialIssuerId,
+                    listOf(CredentialConfigurationIdentifier(issuanceMetadata.credentialConfigurationIdentifier)),
+                    existingDpopKeyAlias = issuanceMetadata.dPoPKeyAlias
+                )
+                val offer = Offer(issuer.credentialOffer)
+
+                //  Create a new UnsignedDocument (fresh keys) via DocumentCreator
+                //    This fires IssueEvent.DocumentRequiresCreateSettings so the app
+                //    can provide CreateDocumentSettings (secure area, number of credentials, etc.)
+                val documentCreator = DocumentCreator(
+                    documentManager = documentManager,
+                    listener = listener,
+                    logger = logger
+                )
+                val requestMap = documentCreator.createDocuments(offer)
+
+                listener(IssueEvent.Started(requestMap.size))
+
+                //  Submit the issuance request using stored AuthorizedRequest
+                //  (skips the authorization flow - uses refresh token instead)
+                val submit = SubmitRequest(config, walletProvider, issuer, authorizedRequest)
+                var response = submit.request(requestMap).also {
+                    authorizedRequest = submit.authorizedRequest
+                }
+
+                //  Check for authentication failure (401 / InvalidToken)
+                //    This happens when both stored access token AND refresh token are invalid.
+                //    Fall back to full OAuth authorization flow and retry with fresh tokens.
+                if (isAuthenticationFailure(response)) {
+                    if (!allowAuthorizationFallback) {
+                        throw ReissuanceAuthorizationException(
+                            "Re-issuance of document $documentId requires user authorization (tokens expired)"
+                        )
+                    }
+                    logger?.d(TAG, "Re-issuance token expired for $documentId, falling back to full authorization")
+                    authorizedRequest = issuerAuthorization.authorize(issuer, null)
+                    val retrySubmit = SubmitRequest(config, walletProvider, issuer, authorizedRequest)
+                    response = retrySubmit.request(requestMap).also {
+                        authorizedRequest = retrySubmit.authorizedRequest
+                    }
+                }
+
+                //  Process the response: store new document, then delete old one
+                val issuedDocumentIds = mutableListOf<DocumentId>()
+                val deferredDocumentIds = mutableListOf<DocumentId>()
+                ProcessResponse(
+                    documentManager = documentManager,
+                    deferredContextFactory = DeferredContextFactory(issuer, authorizedRequest, issuerCreator.dpopKeyAlias),
+                    clientAttestationPopKeyId = issuerCreator.clientAttestationPopKeyId,
+                    listener = listener,
+                    issuedDocumentIds = issuedDocumentIds,
+                    deferredDocumentIds = deferredDocumentIds,
+                    logger = logger,
+                    authorizedRequest = authorizedRequest,
+                    issuer = issuer,
+                    documentToConfigurationMap = requestMap,
+                    dpopKeyAlias = issuerCreator.dpopKeyAlias,
+                    issuanceMetadataStorage = issuanceMetadataStorage,
+                    clientAuthentication = issuerCreator.clientAuthentication,
+                    replacesDocumentId = documentId,
+                ).process(response)
+
+                //  If new document(s) issued successfully, delete the old document.
+                //  If the outcome was deferred, the old document stays alive — the
+                //  replacesDocumentId stored in the deferred context will trigger
+                //  deletion when issueDeferredDocument() eventually succeeds.
+                if (issuedDocumentIds.isNotEmpty()) {
+                    documentManager.deleteDocumentById(documentId)
+                    logger?.d(TAG, "Deleted old document $documentId after re-issuance")
+                }
+
+                listener(IssueEvent.Finished(issuedDocumentIds + deferredDocumentIds))
+
+            } catch (e: Throwable) {
+                logger?.e(TAG, "Something went wrong with reissuance of $documentId", e)
+                listener(failure(e))
+                coroutineScope.cancel("reissueDocument failed", e)
+            }
+        }
+    }
+
+    /**
+     * Checks if a submission response contains an authentication failure,
+     * indicating the stored access token is no longer valid and fresh
+     * authorization is needed.
+     *
+     * Handles two scenarios:
+     * - Clean path: Server returns 401 with proper JSON body → parsed as
+     *   [SubmissionOutcome.Failed] with [CredentialIssuanceError.InvalidToken]
+     * - Fallback path: Server returns 401 without content-type → Ktor throws
+     *   NoTransformationFoundException containing "401 Unauthorized" in its message
+     */
+    private fun isAuthenticationFailure(response: SubmitRequest.Response): Boolean {
+        return response.values.any { result ->
+            // Clean path: SubmissionOutcome.Failed with InvalidToken
+            val outcome = result.outcome.getOrNull()
+            if (outcome is SubmissionOutcome.Failed && outcome.error is CredentialIssuanceError.InvalidToken) {
+                return@any true
+            }
+            // Fallback path: exception when the 401 response cannot be parsed as a typed error
+            // (e.g. response has no content-type or no JSON body)
+            val exception = result.outcome.exceptionOrNull() ?: return@any false
+            exception is CredentialIssuanceError.InvalidToken
+                || exception.message?.contains("401 Unauthorized") == true
+        }
+    }
+
+    /**
+     * Loads issuance metadata from storage.
+     *
+     * @param documentId The document ID
+     * @return The issuance metadata, or null if not found
+     */
+    private suspend fun loadIssuanceMetadata(documentId: DocumentId): IssuanceMetadata? {
+        val table = issuanceMetadataStorage.getTable(IssuanceMetadata.STORAGE_TABLE_SPEC)
+        val bytes = table.get(documentId) ?: return null
+        return IssuanceMetadata.fromByteArray(bytes.toByteArray())
+    }
+
     /**
      * Issues the given [Offer].
      */
@@ -283,6 +461,7 @@ internal class DefaultOpenId4VciManager(
         var authorizedRequest = issuerAuthorization.authorize(issuer, txCode)
         listener(IssueEvent.Started(offer.offeredDocuments.size))
         val issuedDocumentIds = mutableListOf<DocumentId>()
+        val deferredDocumentIds = mutableListOf<DocumentId>()
         val documentCreator = DocumentCreator(
             documentManager = documentManager,
             listener = listener,
@@ -296,14 +475,20 @@ internal class DefaultOpenId4VciManager(
         }
         ProcessResponse(
             documentManager = documentManager,
-            deferredContextFactory = DeferredContextFactory(issuer, authorizedRequest),
-            walletKeyManager = walletAttestationKeyManager,
+            deferredContextFactory = DeferredContextFactory(issuer, authorizedRequest, issuerCreator.dpopKeyAlias),
             clientAttestationPopKeyId = issuerCreator.clientAttestationPopKeyId,
             listener = listener,
             issuedDocumentIds = issuedDocumentIds,
+            deferredDocumentIds = deferredDocumentIds,
             logger = logger,
+            authorizedRequest = authorizedRequest,
+            issuer = issuer,
+            documentToConfigurationMap = requestMap,
+            dpopKeyAlias = issuerCreator.dpopKeyAlias,
+            issuanceMetadataStorage = issuanceMetadataStorage,
+            clientAuthentication = issuerCreator.clientAuthentication,
         ).process(response)
-        listener(IssueEvent.Finished(issuedDocumentIds))
+        listener(IssueEvent.Finished(issuedDocumentIds + deferredDocumentIds))
     }
 
     /**

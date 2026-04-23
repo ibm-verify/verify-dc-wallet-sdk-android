@@ -143,7 +143,7 @@ file.
 
 ```groovy
 dependencies {
-    implementation "eu.europa.ec.eudi:eudi-lib-android-wallet-core:0.25.1-SNAPSHOT"
+    implementation "eu.europa.ec.eudi:eudi-lib-android-wallet-core:0.26.1"
     // required when using the built-in AndroidKeystoreSecureArea implementation provided by the library
     // for user authentication with biometrics
     implementation "androidx.biometric:biometric-ktx:1.2.0-alpha05"
@@ -992,6 +992,72 @@ openId4VciManager.issueDeferredDocument(deferredDocument) { result ->
         is DeferredIssueResult.DocumentExpired -> {
             // The document is expired and cannot be issued
         }
+    }
+}
+```
+
+#### Credential Re-Issuance
+
+The library supports re-issuing previously issued credentials without requiring the user to go
+through the full authorization flow again. After a credential is successfully issued, the library
+automatically stores the authorization context. This metadata
+enables subsequent re-issuance using the stored refresh token.
+
+##### Interactive Re-Issuance (User-Triggered)
+
+Use this when the user explicitly triggers a credential refresh. If the stored tokens have expired, the library falls back to a full OAuth authorization flow:
+
+```kotlin
+val openId4VciManager = wallet.createOpenId4VciManager()
+
+openId4VciManager.reissueDocument(documentId) { event ->
+    when (event) {
+        is IssueEvent.Started -> {
+            // Re-issuance process started
+        }
+        is IssueEvent.DocumentIssued -> {
+            // New credential issued successfully
+            // The old document is automatically deleted
+        }
+        is IssueEvent.DocumentDeferred -> {
+            // Credential issuance is deferred (server-side processing)
+            // Old document remains until the deferred credential is issued
+        }
+        is IssueEvent.Failure -> {
+            // Re-issuance failed
+            val cause = event.cause
+        }
+        is IssueEvent.Finished -> {
+            // Re-issuance process completed
+        }
+        else -> {}
+    }
+}
+```
+
+##### Background Re-Issuance
+
+For performing re-issuance in the background, pass `allowAuthorizationFallback = false` to `reissueDocument()` if you want
+to prevent the library from triggering the authorization flow if the refresh token is no longer valid (default implementation is opening a browser). In this scenario a `ReissuanceAuthorizationException` is delivered via
+`IssueEvent.Failure`:
+
+```kotlin
+openId4VciManager.reissueDocument(
+    documentId = documentId,
+    allowAuthorizationFallback = false,
+) { event ->
+    when (event) {
+        is IssueEvent.Failure -> {
+            if (event.cause is ReissuanceAuthorizationException) {
+                // Tokens expired — ReIssuance failed
+            } else {
+                // Other error
+            }
+        }
+        is IssueEvent.DocumentIssued -> {
+            // Successfully re-issued in background
+        }
+        else -> {}
     }
 }
 ```
