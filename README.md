@@ -18,7 +18,7 @@ IBM uses this fork to evaluate and demonstrate how EUDI-aligned technologies can
 - IBM security, trust, and compliance tooling
 - Enterprise deployment and operational models
 
-This repository **does not represent an official IBM product** and is provided on an open source, best‑effort basis unless otherwise stated.
+This forked copy of the repository is provided on an open source, best‑effort basis unless otherwise stated.
 
 ### Upstream Project and Attribution
 
