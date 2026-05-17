@@ -22,6 +22,7 @@ import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.credentials.registry.provider.selectedEntryId
 import eu.europa.ec.eudi.iso18013.transfer.readerauth.ReaderTrustStore
 import eu.europa.ec.eudi.iso18013.transfer.readerauth.ReaderTrustStoreAware
+import eu.europa.ec.eudi.iso18013.transfer.response.ReaderAuthPolicy
 import eu.europa.ec.eudi.iso18013.transfer.response.Request
 import eu.europa.ec.eudi.iso18013.transfer.response.RequestProcessor
 import eu.europa.ec.eudi.iso18013.transfer.response.RequestedDocuments
@@ -43,6 +44,7 @@ import org.multipaz.mdoc.zkp.ZkSystemRepository
  *
  * @property documentManager The [DocumentManager] instance used to manage documents.
  * @property readerTrustStore The [ReaderTrustStore] the reader trust store.
+ * @property readerAuthPolicy The [ReaderAuthPolicy] for enforcing reader authentication results during response generation.
  * @property privilegedAllowlist The allowlist for privileged browsers/apps that are trusted.
  * @property zkSystemRepository The [ZkSystemRepository] for zero-knowledge proof systems.
  * @property logger Optional logger for logging events.
@@ -54,6 +56,7 @@ private const val TAG = "DCAPIRequestProcessor"
 internal class DCAPIRequestProcessor(
     private val documentManager: DocumentManager,
     override var readerTrustStore: ReaderTrustStore?,
+    private val readerAuthPolicy: ReaderAuthPolicy = ReaderAuthPolicy.EnforceIfPresent,
     private val privilegedAllowlist: String,
     private var zkSystemRepository: ZkSystemRepository?,
     private var logger: Logger? = null,
@@ -68,6 +71,7 @@ internal class DCAPIRequestProcessor(
         val processedDeviceRequest = DeviceRequestProcessor(
             documentManager = documentManager,
             readerTrustStore = readerTrustStore,
+            readerAuthPolicy = readerAuthPolicy,
             zkSystemRepository = zkSystemRepository
         ).process(deviceRequest) as ProcessedDeviceRequest
 
@@ -89,8 +93,10 @@ internal class DCAPIRequestProcessor(
         val filteredProcessedDeviceRequest = ProcessedDeviceRequest(
             documentManager = documentManager,
             sessionTranscript = deviceRequest.sessionTranscriptBytes,
-            requestedDocuments = RequestedDocuments(filteredRequestedDocuments)
-        )
+            requestedDocuments = RequestedDocuments(filteredRequestedDocuments),
+            readerAuthPolicy = readerAuthPolicy,
+            zkSystemRepository = zkSystemRepository
+            )
         return ProcessedDCPAPIRequest(
             processedDeviceRequest = filteredProcessedDeviceRequest,
             providerGetCredentialRequest = request.providerGetCredentialRequest,
@@ -102,9 +108,20 @@ internal class DCAPIRequestProcessor(
 
     @OptIn(ExperimentalDigitalCredentialApi::class)
     private fun ProviderGetCredentialRequest.toDeviceRequest(): Pair<DeviceRequest, String> {
-        // If the mdoc does not receive the origin from the API, it shall abort the transaction.
+        // Resolve the origin according to:
+        // https://developer.android.com/identity/digital-credentials/credential-holder/credential-holder#check-verifier-origin
+        //
+        // Privileged callers, such as trusted browsers, may act on behalf of another verifier
+        // by setting an origin. CallingAppInfo.getOrigin() returns this origin only when the
+        // caller's package name and signing certificate match the provided allowlist.
+        //
+        // If a trusted origin is returned, use it in the response.
+        //
+        // If origin is empty, the request is from an Android native app.
+        // and derive the origin from the caller's signing certificate in the form:
+        // 'android:apk-key-hash:<encoded SHA 256 fingerprint>'
         val callingOrigin = this.callingAppInfo.getOrigin(privilegedAllowlist)
-        requireNotNull(callingOrigin) { "Calling origin must not be null." }
+            ?: getAppOrigin(callingAppInfo.signingInfoCompat.signingCertificateHistory[0].toByteArray())
         logger?.d(TAG, "Origin: $callingOrigin")
 
         val option = this.credentialOptions[0] as GetDigitalCredentialOption

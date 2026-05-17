@@ -19,12 +19,13 @@ package eu.europa.ec.eudi.wallet.dcapi
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.core.graphics.scale
 import com.upokecenter.cbor.CBORObject
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.Locale
 import kotlin.io.encoding.ExperimentalEncodingApi
-import androidx.core.graphics.scale
+import org.multipaz.util.toBase64
 
 private const val SHA_256_ALGORITHM = "SHA-256"
 
@@ -102,4 +103,18 @@ internal fun getDCAPIIsoMdocSessionTranscript(encryptionInfoBase64: String, orig
         Add(dcapiIsoMdocHandover)
     }
     return sessionTranscript.EncodeToBytes()
+}
+
+/**
+ * Calculates the origin for a native Android app,
+ * in the form "android:apk-key-hash:<encoded SHA 256 fingerprint>"
+ * https://developer.android.com/identity/digital-credentials/credential-holder/credential-holder#check-verifier-origin
+ *
+ * @param appSigningInfo the signing information for the native Android app
+ * @return the origin as a string
+ */
+internal fun getAppOrigin(appSigningInfo: ByteArray): String {
+    val digest = MessageDigest.getInstance(SHA_256_ALGORITHM)
+    val appSigningInfoHash = digest.digest(appSigningInfo).toBase64()
+    return "android:apk-key-hash:$appSigningInfoHash"
 }

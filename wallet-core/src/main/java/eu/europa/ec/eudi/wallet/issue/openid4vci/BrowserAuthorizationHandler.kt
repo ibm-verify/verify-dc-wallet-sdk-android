@@ -79,22 +79,22 @@ class BrowserAuthorizationHandler(
      */
     fun resumeWithUri(uri: Uri) {
         logger?.d(TAG, "BrowserAuthorizationHandler.resumeWithUri($uri)")
-        continuation?.let { cont ->
-            val response = runCatching {
-                val authorizationCode = uri.getQueryParameter("code")
-                val serverState = uri.getQueryParameter("state")
-
-                requireNotNull(authorizationCode) { "No authorization code found" }
-                requireNotNull(serverState) { "No server state found" }
-
-                AuthorizationResponse(authorizationCode, serverState)
-            }
-            cont.resume(response.onFailure {
-                logger?.e(TAG, "resumeWithUri: ${it.message}", it)
-            })
-        } ?: throw IllegalStateException("No suspended authorization found").also {
+        val cont = continuation ?: throw IllegalStateException("No suspended authorization found").also {
             logger?.e(TAG, "BrowserAuthorizationHandler.resumeWithUri failed", it)
         }
+        continuation = null
+        val response = runCatching {
+            val authorizationCode = uri.getQueryParameter("code")
+            val serverState = uri.getQueryParameter("state")
+
+            requireNotNull(authorizationCode) { "No authorization code found" }
+            requireNotNull(serverState) { "No server state found" }
+
+            AuthorizationResponse(authorizationCode, serverState)
+        }
+        cont.resume(response.onFailure {
+            logger?.e(TAG, "resumeWithUri: ${it.message}", it)
+        })
     }
 
     /**
