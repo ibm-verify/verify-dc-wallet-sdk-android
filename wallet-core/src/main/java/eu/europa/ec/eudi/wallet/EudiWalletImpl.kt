@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025 European Commission
+ * Copyright (c) 2024-2026 European Commission
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,10 @@ import eu.europa.ec.eudi.iso18013.transfer.readerauth.ReaderTrustStoreAware
 import eu.europa.ec.eudi.wallet.document.DocumentManager
 import eu.europa.ec.eudi.wallet.internal.getCertificate
 import eu.europa.ec.eudi.wallet.issue.openid4vci.OpenId4VciManager
+import eu.europa.ec.eudi.wallet.registration.CertificateTrust
+import eu.europa.ec.eudi.wallet.registration.issuer.DefaultIssuerRegistrationEvaluator
+import eu.europa.ec.eudi.wallet.registration.issuer.IssuerRegistrationPolicy
+import eu.europa.ec.eudi.wallet.registration.issuer.IssuerRegistrationResolver
 import eu.europa.ec.eudi.wallet.logging.Logger
 import eu.europa.ec.eudi.wallet.presentation.PresentationManager
 import eu.europa.ec.eudi.wallet.provider.WalletAttestationsProvider
@@ -58,6 +62,8 @@ class EudiWalletImpl internal constructor(
     val transactionLogger: TransactionLogger?,
     val ktorHttpClientFactory: (() -> HttpClient)?,
     val issuanceMetadataStorage: Storage?,
+    internal val issuerRegistrationTrust: CertificateTrust? = null,
+    internal val issuerRegistrationStatusTrust: CertificateTrust? = null,
 ) : EudiWallet, DocumentManager by documentManager, PresentationManager by presentationManager,
     DocumentStatusResolver by documentStatusResolver {
 
@@ -69,10 +75,10 @@ class EudiWalletImpl internal constructor(
     }
 
     override fun setTrustedReaderCertificates(trustedReaderCertificates: List<X509Certificate>) =
-        setReaderTrustStore(ReaderTrustStore.getDefault(trustedReaderCertificates))
+        setReaderTrustStore(ReaderTrustStore.getDefault(trustedReaderCertificates, config.revocationPolicy))
 
     override fun setTrustedReaderCertificates(vararg rawRes: Int) =
-        setReaderTrustStore(ReaderTrustStore.getDefault(rawRes.map { context.getCertificate(it) }))
+        setReaderTrustStore(ReaderTrustStore.getDefault(rawRes.map { context.getCertificate(it) }, config.revocationPolicy))
 
     /**
      * Creates an instance of [OpenId4VciManager] for interacting with the OpenID for Verifiable Credential Issuance protocol.
@@ -103,6 +109,23 @@ class EudiWalletImpl internal constructor(
 
         val httpClientFactory = ktorHttpClientFactory ?: this.ktorHttpClientFactory
 
+        val registrationEnabled =
+            this@EudiWalletImpl.config.issuerRegistrationPolicy == IssuerRegistrationPolicy.Enabled
+        // The resolver carries everything the issuance path needs to validate the credential issuer's
+        // registration certificate, so it is assembled here rather than where it is used. It is null
+        // when validation is off or no trust is available for the certificate's signer chain.
+        val issuerRegistration = issuerRegistrationTrust
+            ?.takeIf { registrationEnabled }
+            ?.let { certificateTrust ->
+                val evaluator = this@EudiWalletImpl.config.issuerRegistrationEvaluator
+                    ?: DefaultIssuerRegistrationEvaluator(
+                        statusTrust = issuerRegistrationStatusTrust,
+                        logger = logger,
+                        httpClientFactory = httpClientFactory,
+                    )
+                IssuerRegistrationResolver(certificateTrust, evaluator, logger)
+            }
+
         return OpenId4VciManager(context) {
             documentManager(this@EudiWalletImpl)
             walletKeyManager(this@EudiWalletImpl.walletKeyManager)
@@ -112,6 +135,9 @@ class EudiWalletImpl internal constructor(
             if (httpClientFactory != null) {
                 ktorHttpClientFactory(httpClientFactory)
             }
+            this@EudiWalletImpl.config.issuerTrustConfig?.let { issuerTrustConfig(it) }
+            issuerRegistrationEnabled(registrationEnabled)
+            issuerRegistration(issuerRegistration)
         }
     }
 }

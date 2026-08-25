@@ -21,12 +21,14 @@ import eu.europa.ec.eudi.openid4vci.CredentialConfiguration
 import eu.europa.ec.eudi.openid4vci.CredentialConfigurationIdentifier
 import eu.europa.ec.eudi.openid4vci.CredentialIssuerMetadata
 import eu.europa.ec.eudi.openid4vci.CredentialOffer
+import eu.europa.ec.eudi.openid4vci.CredentialReusePolicy
 import eu.europa.ec.eudi.openid4vci.MsoMdocCredential
 import eu.europa.ec.eudi.openid4vci.SdJwtVcCredential
 import eu.europa.ec.eudi.openid4vci.TxCode
 import eu.europa.ec.eudi.wallet.document.format.DocumentFormat
 import eu.europa.ec.eudi.wallet.document.format.MsoMdocFormat
 import eu.europa.ec.eudi.wallet.document.format.SdJwtVcFormat
+import eu.europa.ec.eudi.wallet.registration.RegistrationCertificateResult
 
 /**
  * Represents an offer of credentials from an issuer.
@@ -34,10 +36,15 @@ import eu.europa.ec.eudi.wallet.document.format.SdJwtVcFormat
  * @property issuerMetadata issuer metadata
  * @property offeredDocuments offered documents
  * @property txCodeSpec offered documents
+ * @property issuerRegistration the outcome of validating the credential issuer's registration
+ *  certificate (`issuer_info`, ETSI TS 119 472-3) for this offer, or null when issuer registration
+ *  validation is disabled or the metadata carries no registration certificate. The result is
+ *  informative; the wallet may present it to the user before issuance proceeds.
  */
 
 data class Offer(
     val credentialOffer: CredentialOffer,
+    val issuerRegistration: RegistrationCertificateResult? = null
 ) {
 
     val issuerMetadata: CredentialIssuerMetadata
@@ -76,11 +83,32 @@ data class Offer(
             }
 
         /**
-         * Returns the batch credential issuance size based on the issuer metadata.
-         * If the issuer does not support batch credential issuance, returns 1.
+         * The credential reuse policy from the issuer's credential metadata, if present.
+         * Returns [CredentialReusePolicy.None] when the issuer does not advertise a policy.
          */
-        val batchCredentialIssuanceSize
-            get() = (offer.issuerMetadata.batchCredentialIssuance as? BatchCredentialIssuance.Supported)
-                ?.batchSize ?: 1
+        val credentialReusePolicy: CredentialReusePolicy
+            get() = configuration.credentialMetadata?.credentialReusePolicy
+                ?: CredentialReusePolicy.None
+
+        /**
+         * Returns the effective batch credential issuance size.
+         *
+         * Per ETSI TS 119 472-3: when `credential_reuse_policy` is present,
+         * the `batch_credential_issuance` metadata property MUST be ignored and
+         * the batch size is determined by the reuse policy instead.
+         *
+         * If no reuse policy is present, falls back to the issuer's
+         * `batch_credential_issuance` metadata, or 1 if not supported.
+         */
+        val batchCredentialIssuanceSize: Int
+            get() = when (val policy = credentialReusePolicy) {
+                is CredentialReusePolicy.EUDI -> {
+                    policy.options.firstNotNullOfOrNull { it.batchSize } ?: 1
+                }
+                CredentialReusePolicy.None -> {
+                    (offer.issuerMetadata.batchCredentialIssuance
+                        as? BatchCredentialIssuance.Supported)?.batchSize ?: 1
+                }
+            }
     }
 }
