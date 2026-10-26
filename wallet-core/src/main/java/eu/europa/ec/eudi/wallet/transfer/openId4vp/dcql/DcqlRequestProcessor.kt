@@ -146,7 +146,13 @@ class DcqlRequestProcessor(
             // Resolve trust verdict and build the Requester / TrustMetadata for the Success
             // payload. The legalName goes into TrustMetadata.displayName when the cert chain
             // validated against the configured ReaderTrustStore.
-            val legalName = request.resolvedRequestObject.client.legalName()
+            //
+            // DiAgency verifier certificates carry a CN longer than RFC 5280's ub-common-name
+            // limit of 64 characters (e.g. the session-scoped key-ID used as the subject CN).
+            // BouncyCastle's BCStyle throws IllegalArgumentException when X500Name parses such
+            // a value. Catch the exception and fall back to null so the presentation can
+            // continue without a display name rather than failing entirely.
+            val legalName = runCatching { request.resolvedRequestObject.client.legalName() }.getOrNull()
             val clientId = request.resolvedRequestObject.client.id.clientId
             val trustResult = openid4VpX509CertificateTrust.result
             val (requester, trustMetadata) = when (trustResult) {

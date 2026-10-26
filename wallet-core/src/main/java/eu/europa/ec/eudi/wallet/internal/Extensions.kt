@@ -93,13 +93,18 @@ internal fun ReaderTrustResult.Processed.toRequesterAndTrust(
 ): Pair<Requester, TrustMetadata?> {
     val requester = Requester(
         requesterIdentities = chain.takeIf { it.isNotEmpty() }
-            ?.let {
-                listOf(
-                    OpenID4VPRequesterIdentity(
-                        certChain = X509CertChain.fromJavaX509Certificates(it),
-                        clientId = clientId
+            ?.let { certs ->
+                val certChain = runCatching { X509CertChain.fromJavaX509Certificates(certs) }.getOrNull()
+                if (certChain != null) {
+                    listOf(
+                        OpenID4VPRequesterIdentity(
+                            certChain = certChain,
+                            clientId = clientId
+                        )
                     )
-                )
+                } else {
+                    emptyList()
+                }
             }
             ?: emptyList(),
         appId = appId,
