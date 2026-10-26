@@ -315,7 +315,7 @@ internal class DefaultOpenId4VciManager(
     ) {
         launch(executor, onResolvedOffer) { coroutineScope, callback ->
             try {
-                val offer = offerResolver.resolve(offerUri, useCache = false).getOrThrow()
+                val offer = offerResolver.resolve(offerUri).getOrThrow()
                     .withIssuerRegistration()
                 callback(OfferResult.Success(offer))
                 coroutineScope.cancel("resolveDocumentOffer succeeded")
