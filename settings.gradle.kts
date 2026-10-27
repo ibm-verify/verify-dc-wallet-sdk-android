@@ -15,8 +15,21 @@
  */
 
 pluginManagement {
+    val artifactoryUser: String = System.getenv("ARTIFACTORY_USER") ?: ""
+    val artifactoryPassword: String = System.getenv("ARTIFACTORY_PASSWORD") ?: ""
+    val hasArtifactoryCredentials = artifactoryUser.isNotEmpty() && artifactoryPassword.isNotEmpty()
+
     includeBuild("build-logic")
     repositories {
+        if (hasArtifactoryCredentials) {
+            maven {
+                url = uri("https://na.artifactory.swg-devops.com/artifactory/ibm-verify-mobile-team-maven-virtual")
+                credentials {
+                    username = artifactoryUser
+                    password = artifactoryPassword
+                }
+            }
+        }
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -29,8 +42,21 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
+    val artifactoryUser: String = System.getenv("ARTIFACTORY_USER") ?: ""
+    val artifactoryPassword: String = System.getenv("ARTIFACTORY_PASSWORD") ?: ""
+    val hasArtifactoryCredentials = artifactoryUser.isNotEmpty() && artifactoryPassword.isNotEmpty()
+
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        if (hasArtifactoryCredentials) {
+            maven {
+                url = uri("https://na.artifactory.swg-devops.com/artifactory/ibm-verify-mobile-team-maven-virtual")
+                credentials {
+                    username = artifactoryUser
+                    password = artifactoryPassword
+                }
+            }
+        }
         google()
         mavenCentral()
         maven {
