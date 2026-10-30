@@ -86,14 +86,6 @@ tasks.withType<KotlinCompilationTask<*>>().configureEach {
     }
 }
 
-// Lint crashes with NoClassDefFoundError: jdk.jfr.Event when Gradle runs on a JVM without JFR
-// (e.g. IBM Semeru/OpenJ9 on the SPS build agents). Same workaround as :app and :ui-components.
-tasks.configureEach {
-    if (name.startsWith("lint")) {
-        enabled = false
-    }
-}
-
 dependencyCheck {
     formats = listOf("XML", "HTML")
     nvd.apiKey = System.getenv("NVD_API_KEY") ?: providers.gradleProperty("nvdApiKey").orNull ?: ""
