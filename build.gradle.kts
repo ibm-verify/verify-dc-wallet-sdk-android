@@ -19,8 +19,8 @@ import com.github.jk1.license.filter.LicenseBundleNormalizer
 import com.github.jk1.license.filter.ReduceDuplicateLicensesFilter
 import com.github.jk1.license.render.InventoryMarkdownReportRenderer
 
-// Mend HIGH/CRITICAL findings on build-tooling transitives (AGP lint / sdk-common and the Dokka
-// plugin). Build classpath only; none of these are packaged in a release artifact.
+// Mend HIGH/CRITICAL findings on build-tooling transitives (AGP lint / sdk-common).
+// Build classpath only; none of these are packaged in a release artifact.
 buildscript {
     dependencies {
         constraints {
@@ -56,21 +56,18 @@ buildscript {
 plugins {
     alias(libs.plugins.dependency.license.report)
     alias(libs.plugins.android.library) apply false
-    alias(libs.plugins.dokka) apply false
-    alias(libs.plugins.dependencycheck) apply false
     alias(libs.plugins.jetbrains.kotlin.jvm) apply false
     alias(libs.plugins.maven.publish) apply false
 }
 
 // Mend HIGH/CRITICAL findings on the Android Lint and Unified Test Platform (UTP) tooling
-// configurations of every module, and on the Dokka generator classpaths. These pull in old Netty
+// configurations of every module. These pull in old Netty
 // (grpc-netty), Guava, Jackson, jsoup, FreeMarker and Bouncy Castle. Scoped to those tooling configurations so
 // the library's own runtime dependency graph (and the published POMs) is unchanged.
 allprojects {
     configurations.configureEach {
         val isTooling = name.startsWith("unified-test-platform") ||
-            name.contains("lint", ignoreCase = true) ||
-            name.contains("dokka", ignoreCase = true)
+            name.contains("lint", ignoreCase = true)
         if (isTooling) {
             resolutionStrategy {
                 force("io.netty:netty-codec-http2:4.2.20.Final")
