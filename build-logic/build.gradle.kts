@@ -39,5 +39,14 @@ dependencies {
         implementation("com.google.guava:guava:33.7.2-jre") {
             because("CVE-2026-102554: guava < 33.7.2")
         }
+        implementation("org.bitbucket.b_c:jose4j:0.9.6") {
+            because("CVE-2024-29371: jose4j < 0.9.6")
+        }
+        implementation("org.jdom:jdom2:2.0.6.1") {
+            because("CVE-2021-33813: jdom2 < 2.0.6.1")
+        }
+        implementation("org.apache.commons:commons-lang3:3.18.0") {
+            because("CVE-2025-48924: commons-lang3 < 3.18.0")
+        }
     }
 }

@@ -49,6 +49,10 @@ buildscript {
             classpath("com.google.guava:guava:33.7.2-jre") {
                 because("CVE-2026-102554: guava < 33.7.2")
             }
+            // AGP's bundletool pulls jose4j 0.9.5 onto the buildscript classpath.
+            classpath("org.bitbucket.b_c:jose4j:0.9.6") {
+                because("CVE-2024-29371: jose4j < 0.9.6")
+            }
         }
     }
 }
