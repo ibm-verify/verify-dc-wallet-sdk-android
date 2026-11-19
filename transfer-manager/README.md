@@ -422,7 +422,7 @@ If the credential's signing key requires unlocking (e.g. PIN-protected), provide
 ```kotlin
 val match = matches.first()
 val keyUnlockData: Map<String, KeyUnlockData> = mapOf(
-    match.credential.identifier to SoftwareKeyUnlockData(passphrase = "1234")
+    match.credential.identifier to SoftwareKeyUnlockData(passphrase = userPassphrase)
 )
 val selection = CredentialSelection(matches = listOf(match))
 

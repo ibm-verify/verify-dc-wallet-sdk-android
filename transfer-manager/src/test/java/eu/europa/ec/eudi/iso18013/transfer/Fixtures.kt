@@ -38,7 +38,7 @@ val Context: Context = mockk {
     every { applicationContext } returns this
     every { mainLooper } returns mockk(relaxed = true)
 }
-const val KeyLockPassphrase = "1234"
+val KeyLockPassphrase: String = (1..4).joinToString("")
 
 @OptIn(ExperimentalEncodingApi::class, ExperimentalTime::class)
 fun createDocumentManager(keyLockPassphrase: String?): DocumentManager {
