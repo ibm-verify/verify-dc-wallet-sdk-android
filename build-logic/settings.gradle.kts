@@ -12,7 +12,7 @@ pluginManagement {
                 url = uri("https://na.artifactory.swg-devops.com/artifactory/ibm-verify-mobile-team-maven-virtual")
                 credentials {
                     username = artifactoryUser
-                    password = artifactoryPassword
+                    password = artifactoryPassword // pragma: allowlist secret - read from ARTIFACTORY_PASSWORD env var
                 }
             }
         }
@@ -33,7 +33,7 @@ dependencyResolutionManagement {
                 url = uri("https://na.artifactory.swg-devops.com/artifactory/ibm-verify-mobile-team-maven-virtual")
                 credentials {
                     username = artifactoryUser
-                    password = artifactoryPassword
+                    password = artifactoryPassword // pragma: allowlist secret - read from ARTIFACTORY_PASSWORD env var
                 }
             }
         }
