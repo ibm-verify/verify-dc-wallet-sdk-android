@@ -20,66 +20,51 @@ import COSE.HeaderKeys.Algorithm
 import COSE.OneKey
 import COSE.Sign1Message
 import com.upokecenter.cbor.CBORObject
+import org.bouncycastle.asn1.x500.X500Name
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
-import org.bouncycastle.util.io.pem.PemReader
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import org.multipaz.crypto.EcPublicKey
 import org.multipaz.mdoc.mso.MobileSecurityObjectGenerator
-import java.security.KeyFactory
+import java.math.BigInteger
+import java.security.KeyPair
+import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.PrivateKey
-import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
-import java.security.spec.PKCS8EncodedKeySpec
+import java.security.spec.ECGenParameterSpec
+import java.util.Date
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
-private val SAMPLE_ISSUER_PRIVATE_KEY = """
------BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgnBYfGAK5qBPHdxzB
-Jp6Vot36QHrcobpJgpdjLnPnpJuhRANCAAQUy08Z80ZGi7kfmRM45JQIIZlJgkAJ
-snZ6+Wap8GdbTK/KTJwCwFII2LdF+Ah721aLdguMndLerWeWeAB48gfl
------END PRIVATE KEY-----
-""".trimIndent()
-
-private val SAMPLE_ISSUER_DS = """
------BEGIN CERTIFICATE-----
-MIIC8jCCAnmgAwIBAgIUdlvsblwDAwqQ68tR+6/BKp9pZYcwCgYIKoZIzj0EAwIw
-XDEeMBwGA1UEAwwVUElEIElzc3VlciBDQSAtIEVVIDAxMS0wKwYDVQQKDCRFVURJ
-IFdhbGxldCBSZWZlcmVuY2UgSW1wbGVtZW50YXRpb24xCzAJBgNVBAYTAkVVMB4X
-DTI0MDcyNTA5MjEyM1oXDTI1MTAxODA5MjEyMlowYzElMCMGA1UEAwwcUElEIERT
-IGZvciBzYW1wbGUgZGF0YSAtIDAwMTEtMCsGA1UECgwkRVVESSBXYWxsZXQgUmVm
-ZXJlbmNlIEltcGxlbWVudGF0aW9uMQswCQYDVQQGEwJFVTBZMBMGByqGSM49AgEG
-CCqGSM49AwEHA0IABBTLTxnzRkaLuR+ZEzjklAghmUmCQAmydnr5ZqnwZ1tMr8pM
-nALAUgjYt0X4CHvbVot2C4yd0t6tZ5Z4AHjyB+WjggEQMIIBDDAfBgNVHSMEGDAW
-gBRBi2F24YyB3D+yX1Y//myyBoHgETAWBgNVHSUBAf8EDDAKBggrgQICAAABAjBD
-BgNVHR8EPDA6MDigNqA0hjJodHRwczovL3ByZXByb2QucGtpLmV1ZGl3LmRldi9j
-cmwvcGlkX0NBX0VVXzAxLmNybDAdBgNVHQ4EFgQUgh5Al9G9ATfrSHVDRibkzf7t
-l7cwDgYDVR0PAQH/BAQDAgeAMF0GA1UdEgRWMFSGUmh0dHBzOi8vZ2l0aHViLmNv
-bS9ldS1kaWdpdGFsLWlkZW50aXR5LXdhbGxldC9hcmNoaXRlY3R1cmUtYW5kLXJl
-ZmVyZW5jZS1mcmFtZXdvcmswCgYIKoZIzj0EAwIDZwAwZAIweeQAWuqYHq6hwPF/
-5szZ840aaVFTa1J7FUxvayEQW6QMa50qJ/7HczjkD4OvoSKHAjAuZ/I4rChjdeNF
-wibtidg8cLtZ7sCW59rUvdnz5wvo3VXndZi3sj0jf8CAKZZZNTE=
------END CERTIFICATE-----
-""".trimIndent()
-
 private val bc = BouncyCastleProvider()
 
-@JvmSynthetic
-internal val issuerPrivateKey: PrivateKey = PemReader(SAMPLE_ISSUER_PRIVATE_KEY.reader())
-    .use { reader -> reader.readPemObject().content }
-    .let { privateKeyBytes ->
-        KeyFactory.getInstance("EC", bc)
-            .generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
-    }
+// The issuer key pair and certificate are generated per test run instead of being committed,
+// so that no private key material is stored in source control.
+private val issuerKeyPair: KeyPair = KeyPairGenerator.getInstance("EC", bc)
+    .apply { initialize(ECGenParameterSpec("secp256r1")) }
+    .generateKeyPair()
 
 @JvmSynthetic
-internal val issuerCertificate: X509Certificate = PemReader(SAMPLE_ISSUER_DS.reader())
-    .use { reader -> reader.readPemObject().content }
-    .let { certificateBytes ->
-        CertificateFactory.getInstance("X.509", bc)
-            .generateCertificate(certificateBytes.inputStream())
-    } as X509Certificate
+internal val issuerPrivateKey: PrivateKey = issuerKeyPair.private
+
+@JvmSynthetic
+internal val issuerCertificate: X509Certificate = run {
+    val subject = X500Name("CN=Sample Issuer DS (test only),O=IBM Verify,C=US")
+    val now = System.currentTimeMillis()
+    val builder = JcaX509v3CertificateBuilder(
+        subject,
+        BigInteger.valueOf(now),
+        Date(now - 24L * 60L * 60L * 1000L),
+        Date(now + 365L * 24L * 60L * 60L * 1000L),
+        subject,
+        issuerKeyPair.public
+    )
+    val signer = JcaContentSignerBuilder("SHA256withECDSA").setProvider(bc).build(issuerKeyPair.private)
+    JcaX509CertificateConverter().setProvider(bc).getCertificate(builder.build(signer))
+}
 
 @get:JvmSynthetic
 internal val PrivateKey.oneKey
