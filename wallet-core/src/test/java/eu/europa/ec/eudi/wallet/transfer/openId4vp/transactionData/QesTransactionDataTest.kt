@@ -368,6 +368,11 @@ class QesTransactionDataTest {
     ]
 }"""
 
+        // Placeholder one-time password for parser tests. It is not a credential. Defined here, not inline
+        // in the raw JSON fixture, so the allowlist pragma can sit on its line (a comment inside the JSON
+        // would break parsing).
+        const val ONE_TIME_PASSWORD_ACCESS = """{"type": "OTP", "oneTimePassword": "123456"}""" // pragma: allowlist secret — test fixture, not a credential
+
         const val QES_WITH_REFERENCE = """{
     "type": "https://cloudsignatureconsortium.org/2025/qes",
     "credential_ids": ["pid"],
@@ -376,7 +381,7 @@ class QesTransactionDataTest {
             "signatureQualifier": "eu_eidas_qes",
             "label": "Service Agreement 2026-09",
             "href": "https://rp.example/docs/contract.pdf",
-            "access": {"type": "OTP", "oneTimePassword": "123456"},
+            "access": $ONE_TIME_PASSWORD_ACCESS,
             "checksum": {
                 "value": "HZQzZmMAIWekfGH0/ZKW1nsdt0xg3H6bZYztgsMTLw0=",
                 "algorithmOID": "2.16.840.1.101.3.4.2.1"

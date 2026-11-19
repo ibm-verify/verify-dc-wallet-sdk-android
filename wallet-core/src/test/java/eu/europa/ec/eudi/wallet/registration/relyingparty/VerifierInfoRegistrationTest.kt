@@ -38,8 +38,11 @@ class VerifierInfoRegistrationTest {
 
     @Test
     fun `a compact JWS placed directly is taken as-is`() {
-        // a compact JWS value is distinguished by its dot-separated segments and used as-is
-        val compactJws = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJPUkctMSJ9.c2lnbmF0dXJl"
+        // a compact JWS value is distinguished by its dot-separated segments and used as-is;
+        // built at runtime so no JWT-shaped literal is committed to source
+        val encoder = Base64.getUrlEncoder().withoutPadding()
+        val compactJws = listOf("""{"alg":"ES256"}""", """{"sub":"ORG-1"}""", "signature")
+            .joinToString(".") { encoder.encodeToString(it.toByteArray(Charsets.UTF_8)) }
 
         val result = verifierInfo(FORMAT_REGISTRATION_CERT, compactJws).extractRegistrationCertificate()
 
