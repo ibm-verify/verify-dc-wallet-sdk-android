@@ -1,4 +1,8 @@
-# EUDI Wallet Core library for Android
+# IBM Verify DC Wallet SDK for Android
+
+IBM's distribution of the [EUDI Wallet Core library for Android](https://github.com/eu-digital-identity-wallet/eudi-lib-android-wallet-core).
+
+This fork gives IBM control over packaging (pinned transitive dependency versions), documentation, and distribution stability via semver tags.
 
 
 ## Project Preamble
