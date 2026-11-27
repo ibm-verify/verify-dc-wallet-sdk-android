@@ -1,8 +1,8 @@
-# IBM Verify DC Wallet SDK for Android
+# IBM Verify Digital Credentials Wallet SDK for Android
 
 IBM's distribution of the [EUDI Wallet Core library for Android](https://github.com/eu-digital-identity-wallet/eudi-lib-android-wallet-core).
 
-This fork gives IBM control over packaging (pinned transitive dependency versions), documentation, and distribution stability via semver tags.
+This fork gives IBM control over packaging (pinned transitive dependency versions), documentation, and distribution stability via semver tags. It carries the minimal possible code delta over upstream — patches are upstreamed as soon as practical and dropped from this fork once merged.
 
 
 ## Project Preamble
@@ -34,6 +34,78 @@ This repository is a fork of the following upstream project:
 IBM does not claim ownership of the original project. All original copyrights, trademarks, and licensing terms remain with the EUDI Community and its contributors.
 
 If you are looking for the canonical implementation or wish to contribute to the main project, please refer to the upstream repository.
+
+## Compatibility
+
+This SDK is the wallet-side (holder) counterpart to IBM's server-side Digital Credentials products. It is designed to work with:
+
+| Server product | Version |
+|----------------|---------|
+| IBM Verify Identity Access Digital Credentials (self-hosted) | 26.12 |
+| IBM Verify Digital Credentials (SaaS) | 26.12 |
+
+The SDK implements OpenID for Verifiable Credential Issuance 1.0 (OID4VCI) and OpenID for Verifiable Presentations 1.0 (OID4VP) — both Final specifications from the OpenID Foundation's Digital Credentials Protocols working group. Any issuer or verifier that conforms to these specifications at the dependency versions pinned in this repository's Gradle configuration (`gradle/libs.versions.toml`) should be interoperable, but compatibility is validated and supported only against the IBM server products listed above.
+
+## Upstream Version Mapping
+
+| IBM Fork Version | Upstream eudi-lib-android-wallet-core | Upstream SHA | IBM Patches | Date |
+|------------------|---------------------------------------|--------------|-------------|------|
+| `v0.31.1-ibm-1.0.0` | 0.31.x (`0.31.1-SNAPSHOT`, after v0.31.0) | `0d7c5b19` | Harden reader trust, DCQL legal name and offer resolution for DiAgency · CI and build-tooling housekeeping | 2026-11-19 |
+
+## IBM Patches
+
+### v0.31.1-ibm-1.0.0 — Harden reader trust, DCQL legal name and offer resolution for DiAgency
+
+Commit: `18e58e06`
+Files: `wallet-core/.../transfer/openId4vp/OpenId4VpReaderTrust.kt`, `wallet-core/.../transfer/openId4vp/dcql/DcqlRequestProcessor.kt`, `wallet-core/.../internal/Extensions.kt`, `wallet-core/.../issue/openid4vci/DefaultOpenId4VciManager.kt`
+
+- **Reader trust fails safe and is logged.** `OpenId4VpReaderTrustImpl.isTrusted()` logs the x5c chain it evaluates (subject, issuer, serial, validity, signature algorithm, SANs). If no `ReaderTrustStore` is configured, or the store throws while validating the chain, the result is recorded as untrusted instead of the exception propagating.
+- **Tolerate verifier certificates with an over-long CN.** Some verifier certificates (e.g. DiAgency, which uses a session-scoped key ID as the subject CN) carry a CN longer than the RFC 5280 `ub-common-name` limit of 64 characters, which makes BouncyCastle's `X500Name` parsing throw `IllegalArgumentException`. `legalName()` failures in `DcqlRequestProcessor` now fall back to `null`, so the presentation continues without a display name.
+- **Requester identities fall back to empty.** If converting the reader certificate chain to an `X509CertChain` fails, `toRequesterAndTrust` returns an empty requester identity list instead of failing.
+- **Credential offers use the default cache behaviour.** `resolveDocumentOffer` no longer passes `useCache = false` to the offer resolver.
+
+> **Watch point:** the first two items change security-relevant behaviour (fail-safe trust evaluation and relaxed name handling). Review them against upstream trust changes on every sync.
+
+### v0.31.1-ibm-1.0.0 — CI and build-tooling housekeeping
+
+No functional change to the SDK's public API.
+
+- CI routes Gradle plugin and dependency resolution through an IBM Artifactory instance.
+- Dokka, dependency-check, Sonar and Kover are removed from the build tooling.
+- Build-tooling and transitive dependency pins updated for known vulnerabilities (`jose4j`, `jdom2`, `commons-lang3`); Robolectric bumped to 4.17.
+- Android Lint tasks are enabled.
+- Hard-coded secrets-like literals removed from README and test fixtures; sample issuer key pair and certificate are generated at test runtime.
+
+### Dropped patches
+
+None yet.
+
+## IBM Patch Policy
+
+- **Upstream first.** Any fix or feature that is generally useful is raised as an upstream PR at the same time it is carried here.
+- **Patches are temporary.** A patch is dropped from this fork as soon as it is merged upstream and included in a new upstream release that this fork syncs to.
+- **Breaking upstream changes.** If a new upstream release contains breaking API changes that require app changes, the IBM fork version is bumped to the next MAJOR. The previous IBM version tag remains available for pinning until the app migration is complete.
+
+## How to Sync Upstream
+
+1. Assess the upstream release notes — identify breaking changes and decide MAJOR/MINOR/PATCH bump
+2. Create a `release/<upstream-version>-ibm-X.Y.Z` branch from `main`
+3. `git merge upstream/<tag>` — resolve conflicts only in `gradle.properties` and `README.md`
+4. Re-apply IBM patches that have not yet been merged upstream; drop those that have
+5. Update `VERSION_NAME` in `gradle.properties` and the dependency versions in `gradle/libs.versions.toml` to match upstream's
+6. Update the Upstream Version Mapping table above
+7. Open a PR into `main`, merge, tag, and create a GitHub Release
+8. Update the consuming app to the new version
+
+## Versioning Scheme
+
+IBM fork releases are tagged `v<upstream-version>-ibm-<MAJOR.MINOR.PATCH>`, for example `v0.31.1-ibm-1.0.0`. The upstream part identifies the upstream release the fork is based on. The IBM part is an independent semver starting at `1.0.0`:
+
+| Segment | When to increment |
+|---------|-------------------|
+| MAJOR | Upstream breaking API changes that require changes in the consuming app |
+| MINOR | Sync to a new upstream release with no breaking changes to IBM consumers |
+| PATCH | IBM-only hotfix between upstream syncs |
 
 ---
 
@@ -195,6 +267,8 @@ The released software is an initial development release version:
 ## Requirements
 
 - Android 8 (API level 26) or higher
+- Java 17 (to build from source)
+- Kotlin 2.2.21 and Android Gradle Plugin 9.3.2 (to build from source)
 
 ### Dependencies
 
